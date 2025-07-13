@@ -1,3 +1,5 @@
+const jwt = require("jsonwebtoken");
+
 //generate 6 digit OTP
 const otpGenerate = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -19,4 +21,11 @@ const response = (res, statusCode, message, data = null) => {
   return res.status(statusCode).json(responseObject);
 };
 
-module.exports = {otpGenerate,response}
+//generate jwt token
+const generateJwtToken = (userId) => {
+  return jwt.sign({ userId }, process.env.JWT_SECRET_KEY,{
+    expiresIn:'1y'
+  });
+};
+
+module.exports = { otpGenerate, response, generateJwtToken };

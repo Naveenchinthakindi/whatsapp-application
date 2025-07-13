@@ -1,9 +1,10 @@
 // Step-1: Send OTP
-
-const User = require("../modals/User"); 
-const sendOtpToEmail = require("../services/emailService"); // Email OTP service
+const { uploadFileToCloudinary } = require("../config/cloudinaryConfig");
 const { sendOtpToPhoneNumber, verifyPhoneOtp } = require("../services/twilioService"); // Twilio phone OTP services
-const { otpGenerate, response } = require("../utils"); // Utility functions (OTP generator and response helper)
+const { otpGenerate, response, generateJwtToken } = require("../utils");
+const sendOtpToEmail = require("../services/emailService"); // Email OTP service
+const User = require("../modals/User");
+const Conversation = require("../modals/Conversation");
 
 // Controller function to handle sending OTP to either email or phone
 const sendOtp = async (req, res) => {
@@ -82,11 +83,9 @@ const verifyOtp = async (req, res) => {
       }
 
       user.isVerified = true; // Mark user as verified
-      user.emailOtp = null;   // Clear stored OTP after successful verification
-      await user.save();      // Save changes to DB
-
-      return response(res, 200, "Email verified successfully", user);
-    } 
+      user.emailOtp = null; // Clear stored OTP after successful verification
+      await user.save(); // Save changes to DB
+    }
     // ======= PHONE VERIFICATION FLOW =======
     else {
       if (!phoneNumber || !phoneSuffix) {
@@ -107,15 +106,185 @@ const verifyOtp = async (req, res) => {
       }
 
       user.isVerified = true; // Mark user as verified
-      await user.save();      // Save changes
-
-      return response(res, 200, "Phone verified successfully", user);
+      await user.save(); // Save changes
     }
 
+    // Generate a JWT (JSON Web Token) using the user's _id
+    const token = generateJwtToken(user?._id);
+
+    // Set a cookie named "auth_token" on the response
+    res.cookie("auth_token", token, {
+      httpOnly: true, // Ensures the cookie is not accessible via JavaScript (mitigates XSS attacks)
+      maxAge: 1000 * 60 * 60 * 24 * 365, // Cookie expiration set to 1 year (in milliseconds)
+    });
+
+    return response(res, 200, "OTP verified successfully", { token, user });
   } catch (error) {
     console.error("Verify OTP error: ", error.message); // Log error
     return response(res, 500, "Internal server error"); // Respond with server error
   }
 };
 
-module.exports = { sendOtp, verifyOtp }; // Export controller functions
+// Step-3: Update User Profile
+const updateProfile = async (req, res) => {
+  try {
+    // Destructure user input from the request body
+    const {
+      agree,
+      username,
+      about,
+      email,
+      phoneNumber,
+      phoneSuffix,
+      profilePicture,
+    } = req.body;
+
+    // Get the authenticated user's ID from the decoded JWT (added by middleware)
+    const userId = req.user?.userId;
+
+    // Fetch the user from the database
+    const user = await User.findById(userId);
+    if (!user) {
+      return response(res, 404, "User not found");
+    }
+
+    // ===============================
+    // 1. Handle Profile Picture Upload
+    // ===============================
+    const file = req.file;
+
+    if (file) {
+      // If a file is uploaded, upload it to Cloudinary
+      const uploadResult = await uploadFileToCloudinary(file);
+      console.log("Cloudinary upload result:", uploadResult);
+
+      // Save Cloudinary URL to user profile
+      user.profilePicture = uploadResult?.secure_url;
+    } else if (profilePicture) {
+      // If profilePicture is provided as a URL in the request body
+      user.profilePicture = profilePicture;
+    }
+
+    // ===============================
+    // 2. Update Other Profile Fields
+    // ===============================
+    if (username) user.username = username;
+    if (about) user.about = about;
+    if (agree !== undefined) user.agree = agree;
+
+    // Save updated user data
+    await user.save();
+
+    // Return updated user object (you may want to exclude sensitive fields)
+    return response(res, 200, "User profile updated successfully", user);
+  } catch (error) {
+    console.error("Update profile API error:", error.message);
+    return response(res, 500, "Internal server error");
+  }
+};
+
+// Step-4: Logout Controller
+const logout = async (req, res) => {
+  try {
+    // Clear the JWT cookie by setting it to an empty string and expiring it immediately
+    res.cookie("auth_token", "", {
+      httpOnly: true, // Make sure cookie can't be accessed via client-side JS
+      expires: new Date(0), // Set expiration date in the past to invalidate the cookie
+    });
+
+    // Respond with success message
+    return response(res, 200, "User logged out successfully");
+  } catch (error) {
+    console.error("Logout error:", error.message);
+    return response(res, 500, "Internal server error");
+  }
+};
+
+// Method to check if the user is authenticated
+const checkAuthenticated = async (req, res) => {
+  try {
+    // Extract user ID from decoded JWT (injected by auth middleware)
+    const userId = req.user?.userId;
+
+    // If userId is not available, they are not authenticated
+    if (!userId) {
+      return response(
+        res,
+        401,
+        "Unauthorized! Please log in before accessing the application"
+      );
+    }
+
+    // Fetch user from the database
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return response(res, 404, "User not found. Please log in again.");
+    }
+
+    return response(
+      res,
+      200,
+      "User is authenticated and allowed to use WhatsApp",
+      user
+    );
+  } catch (error) {
+    console.error("checkAuthenticated error:", error.message);
+    return response(res, 500, "Internal server error");
+  }
+};
+
+// Get all users except the logged-in user and their conversation info
+const getAllUsers = async (req, res) => {
+  try {
+    // Get the logged-in user's ID from the decoded JWT
+    const loggedInUserId = req.user?.userId;
+
+    //If user ID is missing (JWT issue), return unauthorized
+    if (!loggedInUserId) {
+      return response(res, 401, "Unauthorized access");
+    }
+
+    // Fetch all users EXCEPT the logged-in user
+    // Select only relevant profile fields to return
+    const users = await User.find({ _id: { $ne: loggedInUserId } })
+      .select("username email profilePicture about lastSeen isOnline phoneSuffix phoneNumber")
+      .lean(); // Return plain JS objects for performance and easier manipulation
+
+    //  For each user, find existing conversation with logged-in user
+    const usersWithConversations = await Promise.all(
+      users.map(async (user) => {
+        const conversation = await Conversation.findOne({
+          participants: { $all: [loggedInUserId, user._id] }, // Find conversation where both users are participants
+        })
+          .populate({
+            path: 'lastMessage', // Populate lastMessage document
+            select: "content createdAt sender receiver", // Select only important fields
+          })
+          .lean(); // Also return plain object
+
+        // Return user profile + conversation (or null if no chat exists)
+        return {
+          ...user,
+          conversation: conversation || null,
+        };
+      })
+    );
+
+    // 4. Send final response
+    return response(res, 200, "All users retrieved successfully", usersWithConversations);
+
+  } catch (error) {
+    console.error("getAllUsers error:", error.message);
+    return response(res, 500, "Internal server error");
+  }
+};
+
+module.exports = {
+  sendOtp,
+  verifyOtp,
+  updateProfile,
+  logout,
+  checkAuthenticated,
+  getAllUsers,
+};
