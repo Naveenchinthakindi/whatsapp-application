@@ -17,7 +17,7 @@ const conversationShema = new Schema({
 
   // The ID of the last message sent in this conversation
   // Can be used to quickly show previews in a chat list
-  lastMessage: { type: mongoose.Schema.Types.ObjectId },
+  lastMessage: { type: mongoose.Schema.Types.ObjectId, ref:"Message"},
 
   // Optional field to track total unread messages in the conversation
   unreadCount: { type: Number, default: 0 }

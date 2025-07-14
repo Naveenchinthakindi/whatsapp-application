@@ -5,6 +5,7 @@ const {
   updateProfile,
   logout,
   checkAuthenticated,
+  getAllUsers,
 } = require("../controllers/authController");
 const { multerMiddleware } = require("../config/cloudinaryConfig");
 const {authMiddleware} = require("../middleware");
@@ -16,6 +17,7 @@ router.get("/logout", logout);
 
 //protected route
 router.put("/update-profile", authMiddleware, multerMiddleware, updateProfile);
-router.get("/check-auth", authMiddleware,checkAuthenticated)
+router.get("/check-auth", authMiddleware,checkAuthenticated);
+router.get("/users",authMiddleware, getAllUsers)
 
 module.exports = router;

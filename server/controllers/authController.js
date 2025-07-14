@@ -248,18 +248,18 @@ const getAllUsers = async (req, res) => {
     // Fetch all users EXCEPT the logged-in user
     // Select only relevant profile fields to return
     const users = await User.find({ _id: { $ne: loggedInUserId } })
-      .select("username email profilePicture about lastSeen isOnline phoneSuffix phoneNumber")
-      .lean(); // Return plain JS objects for performance and easier manipulation
+      .select("username email profilePicture about lastSeen isOnline phoneSuffix phoneNumber") //it will include this fields
+      .lean(); // Return or convert to plain JS objects for performance and easier manipulation
 
-    //  For each user, find existing conversation with logged-in user
+    //  For each user, find existing conversation with logged-in user(YOU) one-to-one conversation
     const usersWithConversations = await Promise.all(
       users.map(async (user) => {
         const conversation = await Conversation.findOne({
           participants: { $all: [loggedInUserId, user._id] }, // Find conversation where both users are participants
         })
           .populate({
-            path: 'lastMessage', // Populate lastMessage document
-            select: "content createdAt sender receiver", // Select only important fields
+            path: 'lastMessage', // Populate the 'lastMessage' field with the corresponding Message document
+            select: "content createdAt sender receiver", // Retrieve only selected fields for optimization
           })
           .lean(); // Also return plain object
 
