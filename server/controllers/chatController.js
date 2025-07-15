@@ -4,7 +4,7 @@ const Conversation = require("../modals/Conversation");
 const Message = require("../modals/Message");
 
 // Controller function to handle sending a message
-exports.sendMessage = async (req, res)  => {
+exports.sendMessage = async (req, res) => {
   const { senderId, receiverId, content, messageStatus } = req.body;
 
   try {
@@ -144,7 +144,11 @@ exports.getMessages = async (req, res) => {
 
     // Verify that the user is a participant in the conversation
     if (!conversation.participants.includes(userId)) {
-      return response(res, 403, "User is not authorized to view this conversation");
+      return response(
+        res,
+        403,
+        "User is not authorized to view this conversation"
+      );
     }
 
     // Fetch all messages in this conversation
@@ -176,7 +180,6 @@ exports.getMessages = async (req, res) => {
 
     // Return the retrieved messages in the response
     return response(res, 200, "Messages retrieved successfully", messages);
-
   } catch (error) {
     // Log and return a server error if something goes wrong
     console.error("getMessages error:", error.message);
@@ -186,15 +189,15 @@ exports.getMessages = async (req, res) => {
 
 // Controller to mark specific messages as "read" by the receiver
 exports.markAsRead = async (req, res) => {
-  const { messageIds } = req.body;          // Array of message IDs to mark as read
-  const userId = req.user.userId;           // ID of the currently logged-in user
+  const { messageIds } = req.body; // Array of message IDs to mark as read
+  const userId = req.user.userId; // ID of the currently logged-in user
 
   try {
     // Fetch messages that match the given IDs and were sent to the current user
     // This helps confirm that the user is authorized to mark them as read
     const messages = await Message.find({
       _id: { $in: messageIds },
-      receiver: userId                      // Ensure these messages were received by this user
+      receiver: userId, // Ensure these messages were received by this user
     });
 
     // Update the message status to "read" only for messages:
@@ -203,19 +206,44 @@ exports.markAsRead = async (req, res) => {
     await Message.updateMany(
       {
         _id: { $in: messageIds },
-        receiver: userId
+        receiver: userId,
       },
       {
-        $set: { messageStatus: "read" }     // Set the message status to "read"
+        $set: { messageStatus: "read" }, // Set the message status to "read"
       }
     );
 
     // Respond with success and the messages that were marked as read
     return response(res, 200, "Messages marked as read successfully", messages);
-
   } catch (error) {
     // Catch and log any unexpected errors
     console.error("markAsRead error: ", error.message);
     return response(res, 500, "Internal server error", error.message);
+  }
+};
+
+//delete the message
+exports.deleteMessage = async () => {
+  const { messageId } = req.params;
+  const userId = req.user.userId;
+
+  try {
+    // Attempt to find the message in the database by its ID
+    const message = await Message.findById(messageId);
+
+    if (!message) return response(res, 404, "Message not found");
+
+    // Check if the current user is the sender of the message 
+    if (message.sender.toString() !== userId) {
+      return response(res, 403, "Not authorized to delete message");
+    }
+
+    // Delete the message from the database
+    await message.deleteOne();
+
+    return response(res, 200, "Message deleted successfully");
+  } catch (error) {
+    // Log any unexpected errors to the console
+    console.error("deleteMessage error:", error.message);
   }
 };

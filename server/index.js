@@ -5,6 +5,7 @@ const dotenv = require('dotenv');
 const { connectDB } = require('./config/db');
 const bodyParser = require('body-parser');
 const authRoutes = require("./routes/authRoute");
+const chatRoutes = require("./routes/chatRoute");
 
 // Load environment variables from .env file
 dotenv.config();
@@ -26,6 +27,7 @@ connectDB();
 
 // Define routes for authentication-related endpoints
 app.use("/api/auth", authRoutes);
+app.use("/api/chat",chatRoutes);
 
 // Start the server and listen on the defined port
 app.listen(PORT, () => {
