@@ -84,6 +84,16 @@ exports.sendMessage = async (req, res) => {
       .populate("sender", "username profilePicture") // Replace sender's ObjectId with actual user document, only include username and profilePicture of sender
       .populate("receiver", "username profilePicture"); // Replace receiver's ObjectId with actual user document, only include username and profilePicture of receiver
 
+    //emit socket event for realtime
+    if (req.io && req.socketUserMap) {
+      const receiverSocketId = req.socketUserMap.get(receiverId);
+      if (receiverSocketId) {
+        req.io.to(receiverSocketId).emit("receive_message", populatedMessage);
+        message.messageStatus = "delivered";
+        await message.save();
+      }
+    }
+
     // Send success response with the new message
     return response(res, 201, "Message sent successfully", populatedMessage);
   } catch (error) {
@@ -119,6 +129,7 @@ exports.getConversation = async (req, res) => {
 
     // Send success response with all fetched conversations
     return response(
+      res,
       200,
       "All conversations fetched successfully",
       conversations
@@ -166,10 +177,10 @@ exports.getMessages = async (req, res) => {
       {
         conversation: conversationId,
         receiver: userId,
-        messageStatus: { $in: ["send", "delivered"] },
+        messageStatus: { $in: ["send", "delivered"] }, // Only update messages that are not yet "read"
       },
       {
-        $set: { messageStatus: "read" }, // Update those messages to "read"
+        $set: { messageStatus: "read" }, // Change their status to "read"
       }
     );
 
@@ -200,6 +211,10 @@ exports.markAsRead = async (req, res) => {
       receiver: userId, // Ensure these messages were received by this user
     });
 
+    if (!messages.length) {
+      return response(res, 404, "No messaged Found", messages);
+    }
+
     // Update the message status to "read" only for messages:
     // - With the given IDs
     // - That were actually received by this user
@@ -213,6 +228,23 @@ exports.markAsRead = async (req, res) => {
       }
     );
 
+    if (req.io && req.socketUserMap) {
+      for (const message of messageIds) {
+        const senderSocketId = req.socketUserMap?.get(
+          message.sender.toString()
+        );
+        if (senderSocketId) {
+          const updatedMessage = {
+            _id: message._id,
+            messageStatus: "read",
+          };
+
+          req.io.to(senderSocketId).emit("message_read", updatedMessage);
+          await message.save();
+        }
+      }
+    }
+
     // Respond with success and the messages that were marked as read
     return response(res, 200, "Messages marked as read successfully", messages);
   } catch (error) {
@@ -223,7 +255,7 @@ exports.markAsRead = async (req, res) => {
 };
 
 //delete the message
-exports.deleteMessage = async () => {
+exports.deleteMessage = async (req, res) => {
   const { messageId } = req.params;
   const userId = req.user.userId;
 
@@ -233,13 +265,22 @@ exports.deleteMessage = async () => {
 
     if (!message) return response(res, 404, "Message not found");
 
-    // Check if the current user is the sender of the message 
+    // Check if the current user is the sender of the message
     if (message.sender.toString() !== userId) {
       return response(res, 403, "Not authorized to delete message");
     }
 
     // Delete the message from the database
     await message.deleteOne();
+
+    if (req.io && req.socketUserMap) {
+      const receiverSocketId = req.socketUserMap?.get(
+        message.receiver.toString()
+      );
+      if (receiverSocketId) {
+        req.io.to(receiverSocketId).emit("message_deleted", messageId);
+      }
+    }
 
     return response(res, 200, "Message deleted successfully");
   } catch (error) {
