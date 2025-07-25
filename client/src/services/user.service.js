@@ -1,7 +1,7 @@
 import axiosInstance from "./url.service";
 
 //method to send otp
-export const sendOtp = async () => {
+export const sendOtp = async (phoneNumber, phoneSuffix, email) => {
   try {
     const response = await axiosInstance.post("/auth/send-otp", {
       phoneNumber,
