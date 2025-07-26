@@ -4,14 +4,19 @@ import { useForm } from "react-hook-form";
 import { yupResolver } from "@hookform/resolvers/yup";
 import { useNavigate } from "react-router";
 import { motion } from "framer-motion";
+import {
+  FaArrowLeft,
+  FaChevronDown,
+  FaUser,
+  FaWhatsapp,
+} from "react-icons/fa6";
+import { sendOtp, verifyOtp } from "../../services/user.service";
+import { toast } from "react-toastify";
+import Spinner from "../../utils/Spinner";
 import useLoginStore from "../../store/useLoginStore";
 import useUserStore from "../../store/useUserStore";
 import countries from "../../utils/Countries";
 import useThemeStore from "../../store/themeStore";
-import { FaChevronDown, FaUser, FaWhatsapp } from "react-icons/fa6";
-import Spinner from "../../utils/Spinner";
-import { sendOtp, verifyOtp } from "../../services/user.service";
-import { toast } from "react-toastify";
 
 const avatars = [
   "https://api.dicebear.com/6.x/avataaars/svg?seed=Felix",
@@ -72,21 +77,19 @@ const Login = () => {
   const initialFormValues = {
     phoneNumber: "",
     selectedCountry: countries[0],
-    otp: ["", "", "", "", ""],
+    otp: ["", "", "", "", "", ""],
     email: "",
     profilePicture: null,
     avatar: avatars[0],
     profilePictureFile: null,
   };
-  const { step, userPhoneData, setStep, setUserPhoneData, resetLoginState } =
-    useLoginStore();
-
+  const { step, userPhoneData, setStep, setUserPhoneData, resetLoginState } = useLoginStore();
+  const { setUser, user, isAuthenticated, clearUser } = useUserStore();
   const [formValues, setFormValues] = useState(initialFormValues);
   const [searchTerm, setSearchTerm] = useState("");
   const [showDropDown, setShowDropDown] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
   const { theme, setTheme } = useThemeStore();
 
   //  Step 1: Email / Phone Form
@@ -111,6 +114,7 @@ const Login = () => {
     watch, // Used for watching avatar, checkbox, etc.
   } = useForm({ resolver: yupResolver(profileValidationSchema) });
 
+  //progress bar component
   const ProgressBar = () => (
     <div
       className={`w-full ${
@@ -124,23 +128,25 @@ const Login = () => {
     </div>
   );
 
+  //method to filter the countries based on search input value
   const filterCountries = countries.filter(
     (country) =>
       country.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       country.dialCode.includes(searchTerm)
   );
 
+  //method to handle the form values
   const handleFormValue = (e) => {
     const { name, value } = e.target;
     setFormValues((prev) => ({ ...prev, [name]: value }));
   };
 
-  const loginSubmit = async () => {
+  //step 1 login send otp method
+  const loginSubmit = async (data) => {
     try {
       setLoading(true);
-      console.log(formValues)
-      if (formValues?.email) {
-        const {email} = formValues;
+      const { email = "" } = formValues;
+      if (email) {
         const response = await sendOtp(null, null, formValues.email);
         if (response.status === "success") {
           toast.info("OTP is send to your email");
@@ -155,7 +161,10 @@ const Login = () => {
         );
         if (response.status === "success") {
           toast.info("OTP send to your phone number");
-          setUserPhoneData({ email });
+          setUserPhoneData({
+            phoneSuffix: formValues?.selectedCountry?.dialCode,
+            phoneNumber: formValues?.phoneNumber,
+          });
           setStep(2);
         }
       }
@@ -167,6 +176,7 @@ const Login = () => {
     }
   };
 
+  //step 2 verify otp method
   const VerifyOtp = async () => {
     try {
       setLoading(true);
@@ -189,13 +199,75 @@ const Login = () => {
 
       if (response.status === "success") {
         const user = response.data?.user;
-
         toast.info("OTP verified successfully");
-        setStep(3);
+        if (user?.username && user?.profilePicture) {
+          setUser(user);
+          toast.success("Welcome back to whatsapp");
+          navigate("/");
+          resetLoginState();
+        } else {
+          setStep(3);
+        }
       }
     } catch (error) {
       console.error("verifyOTP error: ", error.message);
       setError(error.message || "Failed to verify otp");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  //method to handle the file input
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setFormValues((prev) => ({
+        ...prev,
+        profilePictureFile: file,
+        profilePicture: URL.createObjectURL(file),
+      }));
+    }
+  };
+
+  //handle goback method
+  const handleBack = () => {
+    setStep(1);
+    setUserPhoneData(null);
+    setFormValues((prev) => ({ ...prev, otp: ["", "", "", "", "", ""] }));
+    setError("");
+  };
+
+  //method to handle the otp input field
+  const handleOtpChange = (index, value) => {
+    const newOtp = [...formValues.otp];
+    newOtp[index] = value;
+    setFormValues((prev) => ({ ...prev, otp: newOtp }));
+    setOtpValue("otp", newOtp.join(""));
+    if (value && index < 5) {
+      document.getElementById(`otp-${index + 1}`).focus();
+    }
+  };
+
+  //method to submit the profile update 
+  const onProfileSubmit = async (data) => {
+    try {
+      setLoading(true);
+      const formData = new FormData();
+      formData.append("username", data.username);
+      formData.append("agreed", data.agreed);
+      if (data.profilePictureFile) {
+        formData.append("media", profilePictureFile);
+      } else {
+        formData.append("profilePicture", data.avatar);
+      }
+
+      await updateUserProfile(formData);
+      toast.success("Welcome back to whatsapp");
+      navigate("/");
+      resetLoginState();
+    } catch (error) {
+      console.error("onprofilesubmit error: ", error.message);
+      setError(error.message || "Failed to profile update");
     } finally {
       setLoading(false);
     }
@@ -370,12 +442,70 @@ const Login = () => {
               </p>
             )}
             <button
-              className={`w-full bg-green-500 text-white py-2 rounded-md hover:bg-green-600 transition`}
+              type="submit"
+              className={`w-full cursor-pointer bg-green-500 text-white py-2 rounded-md hover:bg-green-600 transition`}
             >
               {loading ? <Spinner /> : "Send OTP"}
             </button>
           </form>
         )}
+        {step === 2 && (
+          <form onSubmit={handleOtpSubmit(VerifyOtp)}>
+            <p
+              className={`text-center ${
+                theme === "dark" ? "text-gray-300" : "text-gray-600"
+              } mb-4`}
+            >
+              Please enter the 6-digit OTP send to your{" "}
+              {userPhoneData ? userPhoneData?.phoneSuffix : "Email"}{" "}
+              {userPhoneData?.phoneNumber && userPhoneData?.phoneNumber}
+            </p>
+            <div className="flex justify-between mb-5">
+              {formValues?.otp?.map((item, index) => (
+                <input
+                  key={index}
+                  value={item}
+                  id={`otp-${index}`}
+                  type="text"
+                  maxLength={1}
+                  onChange={(e) => handleOtpChange(index, e.target.value)}
+                  className={`w-12 h-12 text-center border ${
+                    theme === "dark"
+                      ? "bg-gray-700 border-gray-600 text-white"
+                      : "bg-white border-gray-300"
+                  } rounded-md focus:outline-none focus:ring-1 focus:ring-green-500 ${
+                    otpErrors.otp ? "border-red-500" : ""
+                  }`}
+                />
+              ))}
+            </div>
+
+            <button
+              type="submit"
+              className={`w-full cursor-pointer bg-green-500 text-white py-2 rounded-md hover:bg-green-600 transition`}
+            >
+              {loading ? <Spinner /> : "Verify OTP"}
+            </button>
+            {otpErrors && (
+              <p className="text-red-500 text-center mb-4">
+                {otpErrors?.otp?.message}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={handleBack}
+              className={`w-full mt-2 ${
+                theme === "dark"
+                  ? "bg-gray-700 text-gray-300"
+                  : "bg-gray-200 text-gray-700"
+              } rounded-md py-2 hover:bg-gray-300 transition flex items-center justify-center`}
+            >
+              <FaArrowLeft className="mr-2" />
+              Wrong number? Go back
+            </button>
+          </form>
+        )}
+
         {error && <p className="text-red-500 text-center mb-4">{error}</p>}
       </motion.div>
     </div>

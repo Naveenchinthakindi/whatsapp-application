@@ -21,7 +21,7 @@ const childRoutes = [
 export const router = createBrowserRouter([
   {
     path: "/",
-    // Component:App,
+    Component:App,
     children: childRoutes,
   },
 ]);
