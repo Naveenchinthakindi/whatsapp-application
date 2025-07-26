@@ -20,7 +20,7 @@ const PORT = process.env.PORT;
 const app = express();
 
 const corsOption = {
-    origin : process.env.FRONTEND_URL,
+    origin : process.env.FRONTEND_URL || "http://localhost:5173/",
     credentials: true
 }
 
@@ -30,7 +30,6 @@ app.use(cors(corsOption));
 app.use(express.json()); // Parses incoming requests with JSON payloads
 app.use(cookieParser()); // Parses cookies from incoming requests
 app.use(bodyParser.urlencoded({ extended: true })); // Parses URL-encoded bodies (e.g., from forms)
-app.use(cors()); // Enables Cross-Origin Resource Sharing
 
 // Connect to the database
 connectDB();

@@ -26,7 +26,6 @@ const sendOtpToPhoneNumber = async (phoneNumber) => {
         channel: "sms",    // Send via SMS (can also be 'call' or 'email' if enabled)
       });
 
-    console.log("Twilio response:", response);
     return response;  // Returns Twilio's verification object
   } catch (error) {
     console.error("sendOtpToPhoneNumber error:", error.message);
